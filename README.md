@@ -113,3 +113,100 @@ The component handles:
 - Weak passwords
 - Firebase Auth errors (email already in use, network errors, etc.)
 - Firestore write failures
+
+---
+
+## Auth Callback Cloud Function (Testing Only)
+
+A temporary HTTPS Cloud Function for testing OAuth / redirect-based authentication so a remote frontend can connect without LAN issues. **Does not perform real auth verification — for testing only.**
+
+### What it does
+
+- **Endpoint:** `authCallback` — publicly accessible HTTPS GET endpoint
+- **Query params:** Reads and logs `code`, `state`, `error` (if present)
+- **Response:** JSON `{ success: true, message: "Auth callback received", receivedParams: { ... } }`
+- **CORS:** Basic CORS support enabled for cross-origin requests
+
+### 1. Firebase initialization (one-time)
+
+From the project root:
+
+```bash
+# Install Firebase CLI if needed
+npm install -g firebase-tools
+
+# Log in and select/create project
+firebase login
+firebase use zoomappplatform
+# Or: firebase use --add  (to add and select a project)
+```
+
+### 2. Functions setup
+
+```bash
+# From project root
+cd functions
+npm install
+npm run build
+cd ..
+```
+
+### 3. `functions/src/index.ts` (already in repo)
+
+The function:
+
+- Exports `authCallback` (HTTPS, GET-only)
+- Logs `code`, `state`, `error` when present
+- Returns the required JSON and sets CORS via `cors: true` in options
+
+### 4. Deploy
+
+```bash
+# From project root
+firebase deploy --only functions
+```
+
+Or from `functions/`:
+
+```bash
+cd functions
+npm run deploy
+```
+
+After deploy, the CLI prints the function URL.
+
+### 5. Callback URL format
+
+After deployment you’ll see a URL like:
+
+```
+https://us-central1-<PROJECT_ID>.cloudfunctions.net/authCallback
+```
+
+For this project (if `zoomappplatform` is the project ID):
+
+```
+https://us-central1-zoomappplatform.cloudfunctions.net/authCallback
+```
+
+Use this as the redirect/callback URL in your OAuth provider for testing.
+
+**Example test in browser or curl:**
+
+```bash
+curl "https://us-central1-zoomappplatform.cloudfunctions.net/authCallback?code=test123&state=abc"
+```
+
+Expected response:
+
+```json
+{
+  "success": true,
+  "message": "Auth callback received",
+  "receivedParams": { "code": "test123", "state": "abc" }
+}
+```
+
+### Security note
+
+This function is **temporary and for testing only**. It does not verify tokens or perform real auth. Remove or replace it before production.
