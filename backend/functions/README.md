@@ -1,11 +1,13 @@
 # Zoom token distribution (Firebase Functions)
 
+> Located at `backend/functions`
+
 This module adapts the Zoom token distribution system for Firebase Cloud Functions so the existing pre‑built ZoomTokenService can run safely inside your Firestore/Functions stack.
 
 ## What’s here
 - **ZoomTokenService** (`src/services/zoomTokenService.ts`): performs Zoom Server-to-Server OAuth, caches the bearer token in Firestore (`zoom/tokenCache`), and issues ZAK/OBF tokens for hosts and participants.  
 - **`zoomApi` Express router** (`src/index.ts`): exposes `/api/meetings/start`, `/join`, `/batch-join`, `/setup` behind Firebase Auth, logs failures via `functions.logger`, and records metadata in `zoomMeetings/{meetingId}`.  
-- **Local dotenv support**: `src/index.ts` imports `dotenv/config` so `functions/.env` works with emulators.
+- **Local dotenv support**: `src/index.ts` imports `dotenv/config` so `backend/functions/.env` works with emulators.
 
 ## Prerequisites
 1. Firebase project with Firestore, Authentication, and Functions enabled (Node 18+).  
@@ -21,10 +23,10 @@ firebase functions:config:set zoom.client_id="ZOOM_CLIENT_ID" \
   zoom.client_secret="ZOOM_CLIENT_SECRET" \
   zoom.account_id="ZOOM_ACCOUNT_ID"
 ```
-`functions/src/index.ts` will also read `functions:config` values such as `zoom.client_id`, `zoom.client_secret`, and `zoom.account_id`.
+`backend/functions/src/index.ts` will also read `functions:config` values such as `zoom.client_id`, `zoom.client_secret`, and `zoom.account_id`.
 
 ### Local development (`firebase emulators:start`)
-Create `functions/.env` with:
+Create `backend/functions/.env` with:
 ```
 ZOOM_CLIENT_ID=...
 ZOOM_CLIENT_SECRET=...
@@ -93,14 +95,14 @@ Replace `/join` or `/batch-join` as needed and include participant arrays.
 
 ## Deployment
 ```bash
-cd functions
+cd backend/functions
 npm run build
 firebase deploy --only functions
 ```
 Use `firebase functions:log --only zoomApi` or the Cloud Console logs to monitor the `zoomApi` function.
 
 ## OAuth redirect helper
-`script.py` (root) runs a lightweight HTTP server at port 3000 that forwards Zoom OAuth callbacks to `zoomtest://oauth` (useful for Flutter deep links during PKCE flows). Run it alongside your emulator if you rely on Zoom’s OAuth redirect URI.
+`scripts/zoom_oauth_redirect.py` (root) runs a lightweight HTTP server at port 3000 that forwards Zoom OAuth callbacks to `zoomtest://oauth` (useful for Flutter deep links during PKCE flows). Run it alongside your emulator if you rely on Zoom’s OAuth redirect URI.
 
 ## Monitoring & optional policies
 - Export logs to BigQuery for analytics (each invocation logs the meeting ID, endpoint, and `zoomApi` tag).  

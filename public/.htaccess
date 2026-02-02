@@ -1,0 +1,9 @@
+# SPA fallback for Hostinger (Apache): serve index.html for all routes
+# so /auth-callback and other client-side routes work
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteBase /
+  RewriteCond %{REQUEST_FILENAME} !-f
+  RewriteCond %{REQUEST_FILENAME} !-d
+  RewriteRule ^ index.html [L]
+</IfModule>

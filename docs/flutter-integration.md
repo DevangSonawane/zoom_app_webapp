@@ -4,8 +4,8 @@ This document describes how the pre-built Flutter frontend connects to the Zoom 
 
 ## What you already have
 - **Flutter UI**: A ready-to-use frontend whose responsibilities are signing in admins/participants, requesting tokens, and passing them to the Zoom Video SDK.
-- **Firebase + Functions backend**: Exposes `/api/meetings/start`, `/join`, `/batch-join`, and `/setup` endpoints inside `functions/src/index.ts` (see `functions/README.md`).
-- **Optional Node server**: The `zoom-integration` folder can also serve tokens over HTTP or WebSocket if you need a standalone service.
+- **Firebase + Functions backend**: Exposes `/api/meetings/start`, `/join`, `/batch-join`, and `/setup` endpoints inside `backend/functions/src/index.ts` (see `backend/functions/README.md`).
+- **Optional Node server**: The `backend/zoom-integration` folder can also serve tokens over HTTP or WebSocket if you need a standalone service.
 
 ## Prerequisites
 1. **Flutter toolchain** (latest stable). Your Flutter project should include `firebase_core`, `firebase_auth`, `cloud_firestore`, and `http` (or another HTTP client).
@@ -58,7 +58,7 @@ final zakToken = data['zakToken'];
 ```
 Repeat for `/join` or `/batch-join` by adjusting the payload.
 
-### Available endpoints (see `functions/README.md`)
+### Available endpoints (see `backend/functions/README.md`)
 - `POST /api/meetings/start` → returns host ZAK token
 - `POST /api/meetings/join` → returns participant OBF token
 - `POST /api/meetings/batch-join` → bulk OBF issuance
@@ -75,7 +75,7 @@ doc.snapshots().listen((snapshot) {
   // Use `metadata['zakTokenIssuedAt']` or similar fields if your Flutter UI shows status
 });
 ```
-Make sure Firestore security rules align with your access model (admin vs. participant). The rules should mirror the restrictions applied in `functions/src/index.ts`.
+Make sure Firestore security rules align with your access model (admin vs. participant). The rules should mirror the restrictions applied in `backend/functions/src/index.ts`.
 
 ## Local development
 1. Run Firebase emulators:
@@ -84,16 +84,16 @@ Make sure Firestore security rules align with your access model (admin vs. parti
    ```
 2. Point Flutter to the emulator URL for functions (look in `firebase.json` for host/port). Usually:
    `http://localhost:5001/<project>/<region>/zoomApi/api/...`
-3. Keep `script.py` running if your Flutter app uses the Zoom OAuth PKCE flow; it listens on port 3000 and redirects Zoom’s callback to `zoomtest://oauth`:
+3. Keep `scripts/zoom_oauth_redirect.py` running if your Flutter app uses the Zoom OAuth PKCE flow; it listens on port 3000 and redirects Zoom’s callback to `zoomtest://oauth`:
    ```bash
-   python3 script.py
+   python3 scripts/zoom_oauth_redirect.py
    ```
    - Use `http://localhost:3000/auth/callback` as the Zoom redirect URI while testing.
    - For Android emulator use `http://10.0.2.2:3000/auth/callback`, for physical devices use `http://<your-ip>:3000/auth/callback`.
 
 ## Mixing with the Node.js `zoom-integration` server
-If you prefer or need the standalone `zoom-integration` server instead of Firebase Functions:
-- Run `npm install` inside `zoom-integration` and set `.env` with Zoom credentials.
+If you prefer or need the standalone `backend/zoom-integration` server instead of Firebase Functions:
+- Run `npm install` inside `backend/zoom-integration` and set `.env` with Zoom credentials.
 - Point Flutter at `http://<host>:<port>/api/meetings...` and supply the same Firebase ID token (the Node server reuses the Firebase Auth verification logic).
 - Use the WebSocket route (`/socket.io`) if your Flutter client benefits from real-time token delivery.
 
@@ -104,8 +104,8 @@ If you prefer or need the standalone `zoom-integration` server instead of Fireba
 - Inspect Firestore’s `zoomMeetings` document for metadata when a call fails.
 
 ## References
-- Firebase Functions API: `functions/README.md`
-- Zoom Server-to-Server helper: `zoom-integration/README.md`
-- OAuth redirect helper: `script.py`
+- Firebase Functions API: `backend/functions/README.md`
+- Zoom Server-to-Server helper: `backend/zoom-integration/README.md`
+- OAuth redirect helper: `scripts/zoom_oauth_redirect.py`
 
 Let me know if you’d like a Flutter `pubspec` example or widget snippets added here.

@@ -1,0 +1,2 @@
+# SPA fallback: serve index.html for all routes so /auth-callback etc. work (Netlify)
+/*    /index.html   200

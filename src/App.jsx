@@ -11,3 +11,5 @@ function App() {
 
   return <AdminPage />;
 }
+
+export default App;

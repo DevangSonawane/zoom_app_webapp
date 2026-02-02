@@ -82,20 +82,35 @@ This implementation uses a **secondary Firebase App instance** to create users w
 
 ```
 zoom_app_webapp/
+├── backend/
+│   ├── functions/              # Firebase auth callback + Zoom token helpers
+│   └── zoom-integration/       # Optional Zoom token distribution HTTP/WebSocket server
+├── docs/
+│   └── flutter-integration.md  # Flutter integration walkthrough
+├── scripts/
+│   └── zoom_oauth_redirect.py  # Local OAuth callback proxy for emulators
 ├── src/
 │   ├── components/
-│   │   └── AdminPage.jsx      # Main admin form component
+│   │   └── AdminPage.jsx       # Main admin form component
 │   ├── firebase/
-│   │   └── config.js          # Firebase configuration with dual app instances
+│   │   └── config.js           # Firebase configuration with dual app instances
 │   ├── App.jsx                 # Root component
 │   ├── main.jsx                # Entry point
 │   └── index.css               # Tailwind CSS imports
+├── public/
+│   └── _redirects              # Vercel/Netlify rewrite helper
 ├── index.html
 ├── package.json
 ├── vite.config.js
 ├── tailwind.config.js
-└── postcss.config.js
+├── postcss.config.js
+└── README.md
 ```
+
+## Additional resources
+
+- **Flutter integration guide** – `docs/flutter-integration.md`
+- **Local OAuth redirect proxy** – `scripts/zoom_oauth_redirect.py`
 
 ## Validation
 
@@ -145,13 +160,13 @@ firebase use zoomappplatform
 
 ```bash
 # From project root
-cd functions
+cd backend/functions
 npm install
 npm run build
 cd ..
 ```
 
-### 3. `functions/src/index.ts` (already in repo)
+### 3. `backend/functions/src/index.ts` (already in repo)
 
 The function:
 
@@ -166,10 +181,10 @@ The function:
 firebase deploy --only functions
 ```
 
-Or from `functions/`:
+Or from `backend/functions/`:
 
 ```bash
-cd functions
+cd backend/functions
 npm run deploy
 ```
 
@@ -210,3 +225,27 @@ Expected response:
 ### Security note
 
 This function is **temporary and for testing only**. It does not verify tokens or perform real auth. Remove or replace it before production.
+
+### Fix "Page not found" on /auth-callback (hosted site)
+
+The app is a **single-page app (SPA)**. The host must serve `index.html` for all paths (e.g. `/auth-callback`) so the React app can handle routing. Otherwise you get "Page not found" on direct or OAuth redirect URLs.
+
+**Hosted site:** https://sselectronics.asynk.in (Hostinger)
+
+#### Hostinger (Apache)
+
+A `public/.htaccess` file is included so that when you build and upload `dist/` to Hostinger, Apache will serve `index.html` for all routes (including `/auth-callback`).
+
+1. Run `npm run build` (this copies `public/.htaccess` into `dist/`).
+2. Upload the **contents** of the `dist/` folder to your Hostinger public_html (or the domain’s root) via File Manager or FTP.
+3. Ensure `.htaccess` is uploaded (it’s inside `dist/` after build). If your client hides dotfiles, enable “Show hidden files” or upload `.htaccess` manually from `dist/.htaccess`.
+
+After redeploying, https://sselectronics.asynk.in/auth-callback should load the app.
+
+#### Other hosts
+
+- **Firebase Hosting:** `firebase.json` has rewrites. Deploy with `npm run build` then `firebase deploy --only hosting`.
+- **Netlify:** `public/_redirects` is copied to `dist/`. Deploy the `dist/` folder.
+- **Vercel:** `vercel.json` rewrites to `/index.html`. Deploy as usual.
+- **Nginx:** In `location /`: `try_files $uri $uri/ /index.html;`
+- **Apache (other):** In the folder with `index.html`, add `.htaccess`: `FallbackResource /index.html`
