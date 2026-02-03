@@ -39,18 +39,13 @@ const zoomConfig: ZoomTokenServiceConfig = {
     process.env.ZOOM_ACCOUNTID ??
     runtimeZoomConfig.account_id ??
     runtimeZoomConfig.accountId ??
-    "",
+    undefined,
   enableFirestoreCache: true,
 };
 
-if (!zoomConfig.clientId || !zoomConfig.clientSecret || !zoomConfig.accountId) {
-  const hint = [
-    "ZOOM_CLIENT_ID",
-    "ZOOM_CLIENT_SECRET",
-    "ZOOM_ACCOUNT_ID",
-    "run `firebase functions:config:get` to inspect `zoom` namespace",
-  ].join(", ");
-functions.logger.error("zoomApi", "Missing Zoom credentials", { hint });
+if (!zoomConfig.clientId || !zoomConfig.clientSecret) {
+  const hint = ["ZOOM_CLIENT_ID", "ZOOM_CLIENT_SECRET", "run `firebase functions:config:get` to inspect `zoom` namespace"].join(", ");
+  functions.logger.error("zoomApi", "Missing Zoom credentials", { hint });
   throw new Error("Zoom credentials are missing; configure them via firebase functions:config:set");
 }
 

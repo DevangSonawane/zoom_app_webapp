@@ -36,23 +36,20 @@ class ZoomTokenService {
     console.log('🔄 Fetching new access token...');
 
     try {
-      // Create Basic Auth header: base64(clientId:clientSecret)
       const credentials = Buffer.from(`${this.clientId}:${this.clientSecret}`).toString('base64');
+      const grantType = this.accountId ? 'account_credentials' : 'client_credentials';
+      const body = new URLSearchParams();
+      body.append('grant_type', grantType);
+      if (this.accountId) {
+        body.append('account_id', this.accountId);
+      }
 
-      const response = await axios.post(
-        this.oauthURL,
-        null, // No body required
-        {
-          params: {
-            grant_type: 'account_credentials',
-            account_id: this.accountId
-          },
-          headers: {
-            'Authorization': `Basic ${credentials}`,
-            'Content-Type': 'application/x-www-form-urlencoded'
-          }
+      const response = await axios.post(this.oauthURL, body.toString(), {
+        headers: {
+          'Authorization': `Basic ${credentials}`,
+          'Content-Type': 'application/x-www-form-urlencoded'
         }
-      );
+      });
 
       this.accessToken = response.data.access_token;
       // Token valid for 1 hour (3600 seconds)

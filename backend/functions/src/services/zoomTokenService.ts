@@ -8,7 +8,7 @@ const CACHE_PATH = "zoom/tokenCache";
 export interface ZoomTokenServiceConfig {
   clientId: string;
   clientSecret: string;
-  accountId: string;
+  accountId?: string;
   enableFirestoreCache?: boolean;
 }
 
@@ -42,8 +42,8 @@ export class ZoomTokenService {
   private cacheDocRef: DocumentReference | null = null;
 
   constructor(private config: ZoomTokenServiceConfig, private firestore?: Firestore) {
-    if (!config.clientId || !config.clientSecret || !config.accountId) {
-      throw new Error("Zoom credentials (clientId/clientSecret/accountId) must be provided");
+    if (!config.clientId || !config.clientSecret) {
+      throw new Error("Zoom credentials (clientId/clientSecret) must be provided");
     }
     if (config.enableFirestoreCache && this.firestore) {
       this.cacheDocRef = this.firestore.doc(CACHE_PATH);
@@ -89,24 +89,23 @@ export class ZoomTokenService {
       }
     }
 
-      functions.logger.info("zoomService", "Fetching new Zoom access token");
+    functions.logger.info("zoomService", "Fetching new Zoom access token");
     const credentials = Buffer.from(`${this.config.clientId}:${this.config.clientSecret}`).toString("base64");
 
     try {
-      const response = await axios.post(
-        this.oauthURL,
-        null,
-        {
-          params: {
-            grant_type: "account_credentials",
-            account_id: this.config.accountId,
-          },
-          headers: {
-            Authorization: `Basic ${credentials}`,
-            "Content-Type": "application/x-www-form-urlencoded",
-          },
-        }
-      );
+      const grantType = this.config.accountId ? "account_credentials" : "client_credentials";
+      const body = new URLSearchParams();
+      body.append("grant_type", grantType);
+      if (this.config.accountId) {
+        body.append("account_id", this.config.accountId);
+      }
+
+      const response = await axios.post(this.oauthURL, body.toString(), {
+        headers: {
+          Authorization: `Basic ${credentials}`,
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+      });
 
       const accessToken = response.data.access_token;
       const expiry = Date.now() + response.data.expires_in * 1000;

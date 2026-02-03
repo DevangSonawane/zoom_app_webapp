@@ -50,8 +50,8 @@ class ZoomTokenService {
         this.accessToken = null;
         this.accessTokenExpiry = null;
         this.cacheDocRef = null;
-        if (!config.clientId || !config.clientSecret || !config.accountId) {
-            throw new Error("Zoom credentials (clientId/clientSecret/accountId) must be provided");
+        if (!config.clientId || !config.clientSecret) {
+            throw new Error("Zoom credentials (clientId/clientSecret) must be provided");
         }
         if (config.enableFirestoreCache && this.firestore) {
             this.cacheDocRef = this.firestore.doc(CACHE_PATH);
@@ -96,12 +96,15 @@ class ZoomTokenService {
         }
         functions.logger.info("zoomService", "Fetching new Zoom access token");
         const credentials = Buffer.from(`${this.config.clientId}:${this.config.clientSecret}`).toString("base64");
+        const grantType = this.config.accountId ? "account_credentials" : "client_credentials";
+        const body = new URLSearchParams();
+        body.append("grant_type", grantType);
+        if (this.config.accountId) {
+            body.append("account_id", this.config.accountId);
+        }
+
         try {
-            const response = await axios_1.default.post(this.oauthURL, null, {
-                params: {
-                    grant_type: "account_credentials",
-                    account_id: this.config.accountId,
-                },
+            const response = await axios_1.default.post(this.oauthURL, body.toString(), {
                 headers: {
                     Authorization: `Basic ${credentials}`,
                     "Content-Type": "application/x-www-form-urlencoded",

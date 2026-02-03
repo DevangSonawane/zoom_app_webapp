@@ -1,0 +1,469 @@
+openapi: 3.0.3
+info:
+  title: Zoom Token Distribution API
+  version: 1.0.0
+  description: |
+    Programmatic access to ZAK and OBF token distribution for hosts and participants.
+    Built to satisfy the March 2, 2026 compliance deadline, this API layers Zoom
+    Server-to-Server OAuth with real-time WebSocket delivery of short-lived credentials.
+servers:
+  - url: http://{hostname}:{port}
+    description: Local/development server
+    variables:
+      hostname:
+        default: localhost
+        description: Hostname of the Express server instance
+      port:
+        default: '3000'
+        description: Port where the HTTP API listens
+paths:
+  /:
+    get:
+      summary: Root metadata and service information
+      responses:
+        '200':
+          description: High-level service metadata
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RootResponse'
+
+  /api/health:
+    get:
+      summary: Health check that validates connectivity with Zoom
+      responses:
+        '200':
+          description: Healthy status (Zoom reachable)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthSuccessResponse'
+        '503':
+          description: Proxy to Zoom is unreachable or tokens could not be fetched
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthFailureResponse'
+
+  /api/meetings/start:
+    post:
+      summary: Issue a ZAK token for a host so they can start or manage a meeting
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MeetingStartRequest'
+      responses:
+        '200':
+          description: ZAK token returned with meeting context
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ZakTokenResponse'
+        '400':
+          description: Missing meetingId or hostUserId
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal zoom/service failure
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/meetings/join:
+    post:
+      summary: Issue an OBF token to a participant scoped to a specific meeting
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MeetingJoinRequest'
+      responses:
+        '200':
+          description: OBF token ready for client consumption
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ObfTokenResponse'
+        '400':
+          description: Missing meetingId or participantUserId
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Token retrieval failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/meetings/batch-join:
+    post:
+      summary: Bulk issue OBF tokens to multiple participants
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BatchJoinRequest'
+      responses:
+        '200':
+          description: Batch distribution results grouped by success/failure
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchJoinResponse'
+        '400':
+          description: Invalid meeting ID or participant array
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Unhandled error during batch issuance
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/meetings/setup:
+    post:
+      summary: Acquire ZAK for the host plus OBF tokens for multiple participants
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MeetingSetupRequest'
+      responses:
+        '200':
+          description: All credentials packaged together
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MeetingSetupResponse'
+        '400':
+          description: Missing meetingId or hostUserId
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Failure during token orchestration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+components:
+  schemas:
+    RootResponse:
+      type: object
+      properties:
+        service:
+          type: string
+          example: Zoom Token Distribution API
+        version:
+          type: string
+          example: 1.0.0
+        status:
+          type: string
+          example: running
+        compliance:
+          type: string
+          example: March 2, 2026 ready
+        endpoints:
+          type: object
+          properties:
+            health:
+              type: string
+              example: GET /api/health
+            startMeeting:
+              type: string
+              example: POST /api/meetings/start
+            joinMeeting:
+              type: string
+              example: POST /api/meetings/join
+            batchJoin:
+              type: string
+              example: POST /api/meetings/batch-join
+            setupMeeting:
+              type: string
+              example: POST /api/meetings/setup
+        websocket:
+          type: object
+          properties:
+            url:
+              type: string
+              example: ws://localhost:3000
+            events:
+              type: object
+              properties:
+                client:
+                  type: array
+                  items:
+                    type: string
+                  example: [authenticate, meeting:start, meeting:join, meeting:distribute, ping]
+                server:
+                  type: array
+                  items:
+                    type: string
+                  example: [authenticated, meeting:started, meeting:credentials, meeting:distributed, error, pong]
+        documentation:
+          type: string
+          example: https://developers.zoom.us/docs/video-sdk/auth/
+
+    HealthSuccessResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        status:
+          type: string
+          example: healthy
+        zoom:
+          type: string
+          example: connected
+        timestamp:
+          type: string
+          format: date-time
+    HealthFailureResponse:
+      allOf:
+        - $ref: '#/components/schemas/ErrorResponse'
+      properties:
+        status:
+          type: string
+          example: unhealthy
+        zoom:
+          type: string
+          example: disconnected
+        timestamp:
+          type: string
+          format: date-time
+
+    MeetingStartRequest:
+      type: object
+      required:
+        - meetingId
+        - hostUserId
+      properties:
+        meetingId:
+          type: string
+          description: Zoom meeting ID
+          example: '1234567890'
+        hostUserId:
+          type: string
+          description: Host email or Zoom user ID
+          example: host@example.com
+
+    MeetingJoinRequest:
+      type: object
+      required:
+        - meetingId
+        - participantUserId
+      properties:
+        meetingId:
+          type: string
+          description: Zoom meeting ID
+          example: '1234567890'
+        participantUserId:
+          type: string
+          description: Participant email or Zoom user ID
+          example: participant@example.com
+
+    BatchJoinRequest:
+      type: object
+      required:
+        - meetingId
+        - participantUserIds
+      properties:
+        meetingId:
+          type: string
+          description: Zoom meeting ID
+          example: '1234567890'
+        participantUserIds:
+          type: array
+          description: List of participant email addresses or Zoom IDs
+          items:
+            type: string
+          example: [alice@example.com, bob@example.com]
+
+    MeetingSetupRequest:
+      type: object
+      required:
+        - meetingId
+        - hostUserId
+      properties:
+        meetingId:
+          type: string
+          example: '1234567890'
+        hostUserId:
+          type: string
+          example: host@example.com
+        participantUserIds:
+          type: array
+          description: Optional list of participants for instant OBF distribution
+          items:
+            type: string
+          example: [alice@example.com, bob@example.com]
+
+    ZakTokenResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        meetingId:
+          type: string
+          example: '1234567890'
+        zakToken:
+          type: string
+          description: Zoom Access Key token for the host
+          example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+        expiresIn:
+          type: string
+          example: 2 hours
+        message:
+          type: string
+          example: Meeting credentials generated successfully
+
+    ObfTokenResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        meetingId:
+          type: string
+          example: '1234567890'
+        obfToken:
+          type: string
+          description: One-time Join token scoped to a meeting
+          example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+        expiresIn:
+          type: string
+          example: 30 minutes
+        message:
+          type: string
+          example: Join credentials generated successfully
+
+    ParticipantTokenResult:
+      type: object
+      properties:
+        userId:
+          type: string
+          example: user1@example.com
+        obfToken:
+          type: string
+          example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+        success:
+          type: boolean
+          example: true
+        error:
+          type: string
+          description: Only populated when success is false
+          example: Zoom user not found
+
+    BatchJoinResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        meetingId:
+          type: string
+          example: '1234567890'
+        results:
+          type: object
+          properties:
+            successful:
+              type: array
+              items:
+                $ref: '#/components/schemas/ParticipantTokenResult'
+              description: Tokens issued successfully
+            failed:
+              type: array
+              items:
+                $ref: '#/components/schemas/ParticipantTokenResult'
+              description: Participants that could not be issued tokens
+        summary:
+          type: object
+          properties:
+            total:
+              type: integer
+              example: 3
+            successful:
+              type: integer
+              example: 2
+            failed:
+              type: integer
+              example: 1
+
+    MeetingSetupResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        meetingId:
+          type: string
+          example: '1234567890'
+        host:
+          type: object
+          properties:
+            userId:
+              type: string
+              example: host@example.com
+            zakToken:
+              type: string
+              example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+            expiresIn:
+              type: string
+              example: 2 hours
+        participants:
+          type: array
+          items:
+            type: object
+            properties:
+              userId:
+                type: string
+                example: alice@example.com
+              obfToken:
+                type: string
+                example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+              expiresIn:
+                type: string
+                example: 30 minutes
+        failed:
+          type: array
+          description: Participant tokens that could not be issued
+          items:
+            type: object
+            properties:
+              userId:
+                type: string
+                example: baduser@example.com
+              error:
+                type: string
+                example: Zoom user not authorized
+        timestamp:
+          type: string
+          format: date-time
+          example: '2026-02-03T15:04:05.000Z'
+
+    ErrorResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: false
+        error:
+          type: string
+          example: 'Missing required fields: meetingId and hostUserId'

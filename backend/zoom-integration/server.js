@@ -25,13 +25,13 @@ const PORT = process.env.PORT || 3000;
 const config = {
   clientId: process.env.ZOOM_CLIENT_ID,
   clientSecret: process.env.ZOOM_CLIENT_SECRET,
-  accountId: process.env.ZOOM_ACCOUNT_ID
+  accountId: process.env.ZOOM_ACCOUNT_ID || undefined
 };
 
 // Validate configuration
-if (!config.clientId || !config.clientSecret || !config.accountId) {
+if (!config.clientId || !config.clientSecret) {
   console.error('❌ Missing required Zoom credentials in environment variables');
-  console.error('   Required: ZOOM_CLIENT_ID, ZOOM_CLIENT_SECRET, ZOOM_ACCOUNT_ID');
+  console.error('   Required: ZOOM_CLIENT_ID, ZOOM_CLIENT_SECRET');
   process.exit(1);
 }
 

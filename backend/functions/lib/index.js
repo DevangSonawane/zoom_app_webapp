@@ -55,14 +55,13 @@ const runtimeZoomConfig = (_b = functions.config().zoom) !== null && _b !== void
 const zoomConfig = {
     clientId: (_f = (_e = (_d = (_c = process.env.ZOOM_CLIENT_ID) !== null && _c !== void 0 ? _c : process.env.ZOOM_CLIENTID) !== null && _d !== void 0 ? _d : runtimeZoomConfig.client_id) !== null && _e !== void 0 ? _e : runtimeZoomConfig.clientId) !== null && _f !== void 0 ? _f : "",
     clientSecret: (_k = (_j = (_h = (_g = process.env.ZOOM_CLIENT_SECRET) !== null && _g !== void 0 ? _g : process.env.ZOOM_CLIENTSECRET) !== null && _h !== void 0 ? _h : runtimeZoomConfig.client_secret) !== null && _j !== void 0 ? _j : runtimeZoomConfig.clientSecret) !== null && _k !== void 0 ? _k : "",
-    accountId: (_p = (_o = (_m = (_l = process.env.ZOOM_ACCOUNT_ID) !== null && _l !== void 0 ? _l : process.env.ZOOM_ACCOUNTID) !== null && _m !== void 0 ? _m : runtimeZoomConfig.account_id) !== null && _o !== void 0 ? _o : runtimeZoomConfig.accountId) !== null && _p !== void 0 ? _p : "",
+    accountId: (_p = (_o = (_m = (_l = process.env.ZOOM_ACCOUNT_ID) !== null && _l !== void 0 ? _l : process.env.ZOOM_ACCOUNTID) !== null && _m !== void 0 ? _m : runtimeZoomConfig.account_id) !== null && _o !== void 0 ? _o : runtimeZoomConfig.accountId) !== null && _p !== void 0 ? _p : undefined,
     enableFirestoreCache: true,
 };
-if (!zoomConfig.clientId || !zoomConfig.clientSecret || !zoomConfig.accountId) {
+if (!zoomConfig.clientId || !zoomConfig.clientSecret) {
     const hint = [
         "ZOOM_CLIENT_ID",
         "ZOOM_CLIENT_SECRET",
-        "ZOOM_ACCOUNT_ID",
         "run `firebase functions:config:get` to inspect `zoom` namespace",
     ].join(", ");
     functions.logger.error("zoomApi", "Missing Zoom credentials", { hint });
