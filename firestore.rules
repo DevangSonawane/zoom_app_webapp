@@ -1,0 +1,14 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Zoom tokens - only accessible by the backend (Admin SDK)
+    match /zoomTokens/{userId} {
+      allow read, write: if false;
+    }
+
+    // Zoom meetings metadata - only accessible by the backend (Admin SDK)
+    match /zoomMeetings/{meetingId} {
+      allow read, write: if false;
+    }
+  }
+}

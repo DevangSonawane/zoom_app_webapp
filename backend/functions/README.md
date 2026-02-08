@@ -1,112 +1,170 @@
-# Zoom token distribution (Firebase Functions)
+# Zoom Token Distribution (Firebase Functions)
 
 > Located at `backend/functions`
 
-This module adapts the Zoom token distribution system for Firebase Cloud Functions so the existing pre‑built ZoomTokenService can run safely inside your Firestore/Functions stack.
+Firebase Cloud Functions backend that handles Zoom **OAuth** authorization and distributes **ZAK/OBF tokens** for the Zoom Video SDK.
 
-## What’s here
-- **ZoomTokenService** (`src/services/zoomTokenService.ts`): performs Zoom Server-to-Server OAuth, caches the bearer token in Firestore (`zoom/tokenCache`), and issues ZAK/OBF tokens for hosts and participants.  
-- **`zoomApi` Express router** (`src/index.ts`): exposes `/api/meetings/start`, `/join`, `/batch-join`, `/setup` behind Firebase Auth, logs failures via `functions.logger`, and records metadata in `zoomMeetings/{meetingId}`.  
-- **Local dotenv support**: `src/index.ts` imports `dotenv/config` so `backend/functions/.env` works with emulators.
+## How it works
+
+1. A user (via Flutter) signs in with Firebase Auth and gets a Firebase ID token.
+2. The user connects their Zoom account via the OAuth consent flow (one-time).
+3. When a meeting is needed, the user requests ZAK or OBF tokens from this API.
+4. The backend uses the stored refresh token to get a fresh Zoom access token, then fetches ZAK/OBF from the Zoom API.
 
 ## Prerequisites
-1. Firebase project with Firestore, Authentication, and Functions enabled (Node 18+).  
-2. Zoom Server-to-Server OAuth app with scopes listed in `zoom-integration/README.md`.  
-3. Firebase Admin service account (handled via `firebase-admin` default credentials in Functions).
 
-## Environment configuration
+1. Firebase project with **Authentication**, **Firestore**, and **Functions** enabled.
+2. A **Zoom OAuth app** (not Server-to-Server) in the Zoom App Marketplace with scopes:
+   - `user:read:admin`
+   - `meeting:write:admin`
+3. The OAuth app's redirect URI must point to the callback endpoint (see below).
 
-### Firebase config (production)
-Run:
+## Environment variables
+
+### Local development (`backend/functions/.env`)
+
+```
+ZOOM_CLIENT_ID=your_client_id
+ZOOM_CLIENT_SECRET=your_client_secret
+ZOOM_REDIRECT_URI=http://localhost:5001/<PROJECT_ID>/us-central1/zoomApi/api/auth/zoom/callback
+```
+
+### Production (Firebase config)
+
 ```bash
-firebase functions:config:set zoom.client_id="ZOOM_CLIENT_ID" \
-  zoom.client_secret="ZOOM_CLIENT_SECRET" \
-  zoom.account_id="ZOOM_ACCOUNT_ID"
+firebase functions:config:set \
+  zoom.client_id="YOUR_CLIENT_ID" \
+  zoom.client_secret="YOUR_CLIENT_SECRET" \
+  zoom.redirect_uri="https://us-central1-<PROJECT_ID>.cloudfunctions.net/zoomApi/api/auth/zoom/callback"
 ```
-`backend/functions/src/index.ts` will also read `functions:config` values such as `zoom.client_id`, `zoom.client_secret`, and `zoom.account_id`.
 
-### Local development (`firebase emulators:start`)
-Create `backend/functions/.env` with:
+### Optional
+
+- `ZOOM_AUTHORIZED_DOMAINS` -- comma-separated email domains. If set, only Firebase users with matching emails can call the API.
+
+## API Reference
+
+All endpoints (except `/api/health`) require `Authorization: Bearer <Firebase ID Token>`.
+
+### Zoom OAuth
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/api/auth/zoom/url` | GET | Returns the Zoom OAuth consent URL |
+| `/api/auth/zoom/callback` | POST | Exchanges auth code for tokens. Body: `{ "code": "..." }` |
+| `/api/auth/zoom/status` | GET | Check if user's Zoom account is connected |
+| `/api/auth/zoom/disconnect` | POST | Remove stored Zoom tokens |
+
+### Meeting Tokens
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/api/health` | GET | Health check (no auth required) |
+| `/api/meetings/start` | POST | Issue ZAK token for the authenticated user |
+| `/api/meetings/join` | POST | Issue OBF token for the authenticated user |
+| `/api/meetings/batch-join` | POST | Issue OBF tokens for multiple users |
+| `/api/meetings/setup` | POST | Combined host ZAK + participant OBF tokens |
+
+### Request/Response Examples
+
+**Connect Zoom account (step 1 -- get URL):**
+```bash
+curl -H "Authorization: Bearer <FIREBASE_ID_TOKEN>" \
+  https://.../zoomApi/api/auth/zoom/url
 ```
-ZOOM_CLIENT_ID=...
-ZOOM_CLIENT_SECRET=...
-ZOOM_ACCOUNT_ID=...
-ZOOM_AUTHORIZED_DOMAINS=example.com,acme.org  # optional, comma separated decision gate
-```
-`dotenv` loads these values before Express runs so the emulator sees the credentials even without `firebase functions:config:set`.
-
-### Optional controls
-- `ZOOM_AUTHORIZED_DOMAINS`: if set, only Firebase users whose emails match one of the domains can call the API.  
-- `functions.config().version`: the `/api/health` endpoint surfaces this (helpful for builds/deployments).
-
-## API overview
-All endpoints require `Authorization: Bearer <Firebase ID token>`.
-
-| Endpoint | Purpose | Input | Output |
-| --- | --- | --- | --- |
-| `POST /api/meetings/start` | Issue host ZAK token | `meetingId`, `hostZoomUserId` (defaults to auth email/UID) | `{ meetingId, host, zakToken }` |
-| `POST /api/meetings/join` | Issue participant OBF token | `meetingId`, `participantZoomUserId` (defaults to auth email/UID) | `{ meetingId, participant, obfToken }` |
-| `POST /api/meetings/batch-join` | Issue multiple OBF tokens | `meetingId`, `participants: string[]` | `tokensIssued`, lists of successes/failures |
-| `POST /api/meetings/setup` | Combined host + optional participants | `meetingId`, `hostZoomUserId`, `participantZoomUserIds[]` | Serialized tokens (host + participants) |
-
-Each request logs success/failure via `functions.logger` (tagged `zoomApi`) and persists metadata under `zoomMeetings/{meetingId}` using `storeMeetingMetadata`.
-
-## Firestore metadata
-`storeMeetingMetadata` writes:
 ```json
-{
-  "requestedBy": "<uid>",
-  "requestedByEmail": "<email|null>",
-  "updatedAt": <serverTimestamp>,
-  ...
-}
+{ "url": "https://zoom.us/oauth/authorize?response_type=code&client_id=...&state=..." }
 ```
-Extend the `metadata` payload to include `hostZoomUserId`, `lastZakIssuedAt`, `batchParticipants`, etc. Guard reads/writes via Firestore security rules if needed.
 
-## Authentication
-The Express middleware:
-1. Extracts `Authorization` header, verifies the ID token via `admin.auth().verifyIdToken`.
-2. Optionally enforces `ZOOM_AUTHORIZED_DOMAINS`.
-3. Attaches `req.user` for metadata logging.
-
-## Token caching
-- Access tokens are cached in memory while the invocation lives.  
-- If Firestore caching is enabled (`enableFirestoreCache`), tokens are persisted under `zoom/tokenCache` and reused across cold starts (with a 5‑minute safety buffer).  
-- Manually clear cache via `zoomService.clearCache()` (useful during tests).
-
-## Flutter integration
-1. Sign in users with Firebase Auth.  
-2. Fetch an ID token:
-   ```dart
-   final idToken = await FirebaseAuth.instance.currentUser!.getIdToken();
-   ```
-3. Call the desired endpoint using `Authorization: Bearer <idToken>` and pass `meetingId`/`hostZoomUserId`/`participantZoomUserId`.  
-4. Initialize Zoom Video SDK with the returned `zakToken`/`obfToken`.
-5. For Realtime updates, you can also listen to `zoomMeetings/{meetingId}` documents from Flutter.
-
-## Testing (local or deployed)
+**Connect Zoom account (step 2 -- after user authorizes, send the code):**
 ```bash
-curl -X POST https://us-central1-<PROJECT>.cloudfunctions.net/zoomApi/api/meetings/start \
-  -H "Authorization: Bearer <idToken>" \
+curl -X POST -H "Authorization: Bearer <FIREBASE_ID_TOKEN>" \
   -H "Content-Type: application/json" \
-  -d '{"meetingId":"123456789","hostZoomUserId":"host@company.com"}'
+  -d '{"code":"auth_code_from_zoom"}' \
+  https://.../zoomApi/api/auth/zoom/callback
 ```
-Replace `/join` or `/batch-join` as needed and include participant arrays.
+```json
+{ "success": true, "message": "Zoom account connected", "zoomUserId": "..." }
+```
+
+**Start meeting (get ZAK token):**
+```bash
+curl -X POST -H "Authorization: Bearer <FIREBASE_ID_TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d '{"meetingId":"123456789"}' \
+  https://.../zoomApi/api/meetings/start
+```
+```json
+{ "meetingId": "123456789", "host": "zoom_user_id", "zakToken": "eyJ..." }
+```
+
+**Join meeting (get OBF token):**
+```bash
+curl -X POST -H "Authorization: Bearer <FIREBASE_ID_TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d '{"meetingId":"123456789"}' \
+  https://.../zoomApi/api/meetings/join
+```
+```json
+{ "meetingId": "123456789", "participant": "zoom_user_id", "obfToken": "eyJ..." }
+```
+
+## Firestore Collections
+
+| Collection | Purpose |
+|-----------|---------|
+| `zoomTokens/{firebaseUid}` | Per-user Zoom OAuth tokens (accessToken, refreshToken, expiry, zoomUserId) |
+| `zoomMeetings/{meetingId}` | Meeting metadata and token issuance logs |
+
+## OAuth Flow Diagram
+
+```
+Flutter App                     Backend (Cloud Functions)              Zoom
+-----------                     ------------------------              ----
+    |                                    |                              |
+    |-- GET /auth/zoom/url ------------->|                              |
+    |<-- { url } ------------------------|                              |
+    |                                    |                              |
+    |-- Open URL in browser -------------|----------------------------->|
+    |                                    |       User logs in & grants  |
+    |<-- Redirect with ?code=xxx --------|<-----------------------------|
+    |                                    |                              |
+    |-- POST /auth/zoom/callback ------->|                              |
+    |   { code: "xxx" }                  |-- exchange code for tokens ->|
+    |                                    |<-- access + refresh token ---|
+    |                                    |-- store in Firestore         |
+    |<-- { success, zoomUserId } --------|                              |
+    |                                    |                              |
+    |   (later, when meeting needed)     |                              |
+    |                                    |                              |
+    |-- POST /meetings/start ----------->|                              |
+    |   { meetingId }                    |-- use refresh token -------->|
+    |                                    |<-- access token -------------|
+    |                                    |-- GET /users/{id}/token ---->|
+    |                                    |<-- ZAK token ----------------|
+    |<-- { zakToken } -------------------|                              |
+```
 
 ## Deployment
+
 ```bash
-cd backend/functions
-npm run build
 firebase deploy --only functions
 ```
-Use `firebase functions:log --only zoomApi` or the Cloud Console logs to monitor the `zoomApi` function.
 
-## OAuth redirect helper
-`scripts/zoom_oauth_redirect.py` (root) runs a lightweight HTTP server at port 3000 that forwards Zoom OAuth callbacks to `zoomtest://oauth` (useful for Flutter deep links during PKCE flows). Run it alongside your emulator if you rely on Zoom’s OAuth redirect URI.
+Monitor logs:
+```bash
+firebase functions:log --only zoomApi
+```
 
-## Monitoring & optional policies
-- Export logs to BigQuery for analytics (each invocation logs the meeting ID, endpoint, and `zoomApi` tag).  
-- Implement per-UID rate limiting by incrementing counters in Firestore before calling Zoom (e.g., `zoomRateLimits/{uid}`) or integrate App Check/Cloud Armor.  
-- Use Firestore/Realtime Database listeners instead of websockets; clients can watch `zoomMeetings/{meetingId}` for fresh tokens rather than relying on persistent connections.
+## Local Development
 
-Let me know if you want a separate README for Flutter integration or Firestore security rules for `zoomMeetings`.    	
+```bash
+cd backend/functions
+npm install
+cp .env.example .env  # fill in credentials + redirect URI
+
+# From project root:
+firebase emulators:start --only auth,firestore,functions
+```
+
+See the root [README](../../README.md) for project-wide setup and [Flutter integration guide](../docs/flutter-integration.md) for client-side usage.

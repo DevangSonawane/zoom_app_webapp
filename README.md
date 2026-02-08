@@ -1,251 +1,445 @@
-# Zoom App Webapp - Admin User Creation
+# Zoom App Webapp
 
-A React admin page for creating new user accounts in Firebase without logging out the admin.
-
-## Features
-
-- ✅ Create new users via Firebase Authentication
-- ✅ Pre-validate Display Name uniqueness in Firestore
-- ✅ Admin remains logged in during user creation (using secondary Firebase app instance)
-- ✅ Comprehensive error handling and validation
-- ✅ Modern UI with Tailwind CSS
-- ✅ Responsive design
-
-## Setup
-
-1. **Install dependencies:**
-   ```bash
-   npm install
-   ```
-
-2. **Configure Firebase:**
-   - Open `src/firebase/config.js`
-   - Replace the placeholder values in `firebaseConfig` with your actual Firebase project credentials:
-     - `apiKey`
-     - `authDomain`
-     - `projectId`
-     - `storageBucket`
-     - `messagingSenderId`
-     - `appId`
-
-3. **Set up Firestore:**
-   - Create a `users` collection in Firestore
-   - Set up appropriate security rules (see below)
-
-4. **Run the development server:**
-   ```bash
-   npm run dev
-   ```
-
-## Firebase Security Rules
-
-Make sure your Firestore security rules allow:
-- Reading from the `users` collection to check display name uniqueness
-- Writing to the `users` collection for authenticated admins
-
-Example rules:
-```javascript
-rules_version = '2';
-service cloud.firestore {
-  match /databases/{database}/documents {
-    match /users/{userId} {
-      // Allow read for checking display name uniqueness
-      allow read: if request.auth != null;
-      // Allow write for authenticated users (adjust based on your admin logic)
-      allow write: if request.auth != null;
-    }
-  }
-}
-```
-
-## Architecture Decision: Secondary Firebase App Instance
-
-This implementation uses a **secondary Firebase App instance** to create users without affecting the admin's session.
-
-### Why This Approach?
-
-1. **Independent Authentication State**: Each Firebase app instance maintains its own auth state. Creating a user in the secondary app only affects that app's auth state.
-
-2. **Simplicity**: No need for backend infrastructure or Cloud Functions. Everything runs client-side.
-
-3. **Safety**: The admin's session on the primary app remains completely unaffected.
-
-4. **Cost-Effective**: No additional Cloud Function invocations or server costs.
-
-### How It Works
-
-- **Primary App**: Used for the admin's authentication session
-- **Secondary App**: Used exclusively for creating new users
-- After user creation, the secondary app is signed out to clean up, while the primary app (admin) remains logged in
-
-## Project Structure
-
-```
-zoom_app_webapp/
-├── backend/
-│   ├── functions/              # Firebase auth callback + Zoom token helpers
-│   └── zoom-integration/       # Optional Zoom token distribution HTTP/WebSocket server
-├── docs/
-│   └── flutter-integration.md  # Flutter integration walkthrough
-├── scripts/
-│   └── zoom_oauth_redirect.py  # Local OAuth callback proxy for emulators
-├── src/
-│   ├── components/
-│   │   └── AdminPage.jsx       # Main admin form component
-│   ├── firebase/
-│   │   └── config.js           # Firebase configuration with dual app instances
-│   ├── App.jsx                 # Root component
-│   ├── main.jsx                # Entry point
-│   └── index.css               # Tailwind CSS imports
-├── public/
-│   └── _redirects              # Vercel/Netlify rewrite helper
-├── index.html
-├── package.json
-├── vite.config.js
-├── tailwind.config.js
-├── postcss.config.js
-└── README.md
-```
-
-## Additional resources
-
-- **Flutter integration guide** – `docs/flutter-integration.md`
-- **Local OAuth redirect proxy** – `scripts/zoom_oauth_redirect.py`
-
-## Validation
-
-The form validates:
-- Full Name: Required
-- Display Name: Required, globally unique (checked against Firestore)
-- Email: Required, valid email format
-- Password: Required, minimum 6 characters (Firebase requirement)
-
-## Error Handling
-
-The component handles:
-- Display name already taken
-- Invalid email format
-- Weak passwords
-- Firebase Auth errors (email already in use, network errors, etc.)
-- Firestore write failures
+Backend API for **Zoom Video SDK** integration with a Flutter app. Handles user management (Firebase) and Zoom token distribution (ZAK + OBF) via OAuth.
 
 ---
 
-## Auth Callback Cloud Function (Testing Only)
+## Folder Structure
 
-A temporary HTTPS Cloud Function for testing OAuth / redirect-based authentication so a remote frontend can connect without LAN issues. **Does not perform real auth verification — for testing only.**
-
-### What it does
-
-- **Endpoint:** `authCallback` — publicly accessible HTTPS GET endpoint
-- **Query params:** Reads and logs `code`, `state`, `error` (if present)
-- **Response:** JSON `{ success: true, message: "Auth callback received", receivedParams: { ... } }`
-- **CORS:** Basic CORS support enabled for cross-origin requests
-
-### 1. Firebase initialization (one-time)
-
-From the project root:
-
-```bash
-# Install Firebase CLI if needed
-npm install -g firebase-tools
-
-# Log in and select/create project
-firebase login
-firebase use zoomappplatform
-# Or: firebase use --add  (to add and select a project)
+```
+zoom_app_webapp/
+├── frontend/                         # React admin panel (user creation)
+│   ├── src/
+│   │   ├── components/
+│   │   │   ├── AdminPage.jsx         #   Create users in Firebase
+│   │   │   └── AuthCallback.jsx      #   OAuth test stub
+│   │   └── firebase/config.js        #   Firebase client config
+│   ├── package.json
+│   └── vite.config.js
+│
+├── backend/
+│   └── functions/                    # Firebase Cloud Functions (JavaScript)
+│       ├── index.js                  #   Express app -- all API endpoints
+│       ├── services/
+│       │   └── zoomTokenService.js   #   Zoom OAuth + ZAK/OBF token logic
+│       ├── .env                      #   Credentials (gitignored)
+│       ├── .env.example              #   Template
+│       └── package.json
+│
+├── firebase.json                     # Firebase Hosting + Functions config
+├── .gitignore
+└── README.md                         # This file
 ```
 
-### 2. Functions setup
+---
+
+## How It Works (Complete Flow)
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                         ONE-TIME SETUP                              │
+│                                                                     │
+│  1. Admin creates user accounts via the React frontend              │
+│     (Firebase Auth + Firestore "users" collection)                  │
+│                                                                     │
+│  2. Each user connects their Zoom account (OAuth consent)           │
+│     - Flutter calls GET /api/auth/zoom/url                          │
+│     - Opens the returned URL in a browser                           │
+│     - User logs into Zoom and approves                              │
+│     - Zoom redirects to GET /api/auth/zoom/callback?code=xxx       │
+│     - Backend exchanges code for tokens, stores in Firestore        │
+│     - Browser redirects to zoomtest://oauth (back to Flutter)       │
+└─────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────┐
+│                      EVERY MEETING                                  │
+│                                                                     │
+│  Host wants to start a meeting:                                     │
+│     Flutter calls POST /api/meetings/start { meetingId }            │
+│     → Backend fetches ZAK token from Zoom API                       │
+│     → Returns { zakToken } to Flutter                               │
+│     → Flutter passes ZAK to Zoom Video SDK to start meeting         │
+│                                                                     │
+│  Participant wants to join:                                         │
+│     Flutter calls POST /api/meetings/join { meetingId }             │
+│     → Backend fetches OBF token from Zoom API                       │
+│     → Returns { obfToken } to Flutter                               │
+│     → Flutter passes OBF to Zoom Video SDK to join meeting          │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Setup
+
+### 1. Install
 
 ```bash
-# From project root
 cd backend/functions
 npm install
-npm run build
-cd ..
 ```
 
-### 3. `backend/functions/src/index.ts` (already in repo)
+### 2. Configure `.env`
 
-The function:
+```bash
+cp .env.example .env
+```
 
-- Exports `authCallback` (HTTPS, GET-only)
-- Logs `code`, `state`, `error` when present
-- Returns the required JSON and sets CORS via `cors: true` in options
+Fill in:
+
+```env
+ZOOM_CLIENT_ID=GN1XDY33R_uSm6211ZQ9rw
+ZOOM_CLIENT_SECRET=jNQ4SqI0qgBPmlmtK1a0m2fYR2y4qDtG
+ZOOM_REDIRECT_URI=<see below>
+```
+
+**Redirect URI values:**
+
+| Environment | ZOOM_REDIRECT_URI |
+|------------|-------------------|
+| Local emulator | `http://localhost:5001/<PROJECT_ID>/us-central1/zoomApi/api/auth/zoom/callback` |
+| Production | `https://us-central1-zoomappplatform.cloudfunctions.net/zoomApi/api/auth/zoom/callback` |
+
+**Important:** Whichever URI you use must also be added to the **OAuth Allow List** in the Zoom App Marketplace. Current allow list from the Zoom app:
+
+```
+http://localhost:3000/auth/callback
+http://192.168.1.17:3000/auth/callback
+http://192.168.0.105:3000/auth/callback
+http://10.0.2.2:3000/auth/callback
+https://sselectronics.asynk.in/auth-callback
+https://zoomtest.example.com/oauth
+```
+
+You need to **add your Cloud Functions callback URL** to this list.
+
+### 3. Run locally
+
+```bash
+firebase login
+firebase use zoomappplatform
+firebase emulators:start --only auth,firestore,functions
+```
+
+Base URL: `http://127.0.0.1:5001/zoomappplatform/us-central1/zoomApi`
 
 ### 4. Deploy
 
 ```bash
-# From project root
 firebase deploy --only functions
 ```
 
-Or from `backend/functions/`:
+Production base URL: `https://us-central1-zoomappplatform.cloudfunctions.net/zoomApi`
 
-```bash
-cd backend/functions
-npm run deploy
+---
+
+## API Reference
+
+**Base URL:**
+- Local: `http://127.0.0.1:5001/<PROJECT>/us-central1/zoomApi`
+- Production: `https://us-central1-zoomappplatform.cloudfunctions.net/zoomApi`
+
+All endpoints (except health and GET callback) require:
+```
+Authorization: Bearer <Firebase ID Token>
 ```
 
-After deploy, the CLI prints the function URL.
+---
 
-### 5. Callback URL format
-
-After deployment you’ll see a URL like:
+### Health Check
 
 ```
-https://us-central1-<PROJECT_ID>.cloudfunctions.net/authCallback
+GET /api/health
 ```
 
-For this project (if `zoomappplatform` is the project ID):
+No auth required.
 
-```
-https://us-central1-zoomappplatform.cloudfunctions.net/authCallback
-```
-
-Use this as the redirect/callback URL in your OAuth provider for testing.
-
-**Example test in browser or curl:**
-
-```bash
-curl "https://us-central1-zoomappplatform.cloudfunctions.net/authCallback?code=test123&state=abc"
+**Response:**
+```json
+{ "status": "ok", "timestamp": "2026-02-08T..." }
 ```
 
-Expected response:
+---
 
+### Zoom OAuth -- Connect Account
+
+#### Step 1: Get the consent URL
+
+```
+GET /api/auth/zoom/url
+Authorization: Bearer <Firebase ID Token>
+```
+
+Optional query param: `?code_challenge=xxx` (for PKCE)
+
+**Response:**
 ```json
 {
-  "success": true,
-  "message": "Auth callback received",
-  "receivedParams": { "code": "test123", "state": "abc" }
+  "url": "https://zoom.us/oauth/authorize?response_type=code&client_id=GN1XDY33R_uSm6211ZQ9rw&redirect_uri=...&state=<firebaseUid>",
+  "state": "firebase_uid_here"
 }
 ```
 
-### Security note
+Flutter opens this URL in a browser. User logs into Zoom and approves.
 
-This function is **temporary and for testing only**. It does not verify tokens or perform real auth. Remove or replace it before production.
+#### Step 2a: Browser callback (automatic)
 
-### Fix "Page not found" on /auth-callback (hosted site)
+```
+GET /api/auth/zoom/callback?code=xxx&state=<firebaseUid>
+```
 
-The app is a **single-page app (SPA)**. The host must serve `index.html` for all paths (e.g. `/auth-callback`) so the React app can handle routing. Otherwise you get "Page not found" on direct or OAuth redirect URLs.
+No auth header needed -- Zoom redirects the browser here directly. Backend exchanges the code, stores tokens in Firestore, and redirects to:
 
-**Hosted site:** https://sselectronics.asynk.in (Hostinger)
+```
+zoomtest://oauth?success=true&zoom_user_id=xxx
+```
 
-#### Hostinger (Apache)
+Flutter catches this deep link and knows the account is connected.
 
-A `public/.htaccess` file is included so that when you build and upload `dist/` to Hostinger, Apache will serve `index.html` for all routes (including `/auth-callback`).
+#### Step 2b: Manual callback (from Flutter)
 
-1. Run `npm run build` (this copies `public/.htaccess` into `dist/`).
-2. Upload the **contents** of the `dist/` folder to your Hostinger public_html (or the domain’s root) via File Manager or FTP.
-3. Ensure `.htaccess` is uploaded (it’s inside `dist/` after build). If your client hides dotfiles, enable “Show hidden files” or upload `.htaccess` manually from `dist/.htaccess`.
+If Flutter intercepts the code itself (e.g. via deep link), it can send it directly:
 
-After redeploying, https://sselectronics.asynk.in/auth-callback should load the app.
+```
+POST /api/auth/zoom/callback
+Authorization: Bearer <Firebase ID Token>
+Content-Type: application/json
 
-#### Other hosts
+{ "code": "authorization_code_from_zoom" }
+```
 
-- **Firebase Hosting:** `firebase.json` has rewrites. Deploy with `npm run build` then `firebase deploy --only hosting`.
-- **Netlify:** `public/_redirects` is copied to `dist/`. Deploy the `dist/` folder.
-- **Vercel:** `vercel.json` rewrites to `/index.html`. Deploy as usual.
-- **Nginx:** In `location /`: `try_files $uri $uri/ /index.html;`
-- **Apache (other):** In the folder with `index.html`, add `.htaccess`: `FallbackResource /index.html`
+**Response:**
+```json
+{ "success": true, "message": "Zoom account connected", "zoomUserId": "xxx" }
+```
+
+---
+
+### Zoom OAuth -- Status & Disconnect
+
+#### Check connection status
+
+```
+GET /api/auth/zoom/status
+Authorization: Bearer <Firebase ID Token>
+```
+
+**Response (connected):**
+```json
+{ "connected": true, "zoomUserId": "abc123" }
+```
+
+**Response (not connected):**
+```json
+{ "connected": false }
+```
+
+#### Disconnect Zoom account
+
+```
+POST /api/auth/zoom/disconnect
+Authorization: Bearer <Firebase ID Token>
+```
+
+**Response:**
+```json
+{ "success": true, "message": "Zoom account disconnected" }
+```
+
+---
+
+### Meeting Tokens
+
+All meeting endpoints require the user to have connected their Zoom account first.
+
+#### Start Meeting (ZAK token for host)
+
+```
+POST /api/meetings/start
+Authorization: Bearer <Firebase ID Token>
+Content-Type: application/json
+
+{ "meetingId": "123456789" }
+```
+
+**Response:**
+```json
+{
+  "meetingId": "123456789",
+  "host": "zoom_user_id",
+  "zakToken": "eyJhbGci..."
+}
+```
+
+ZAK token is valid for **2 hours**.
+
+#### Join Meeting (OBF token for participant)
+
+```
+POST /api/meetings/join
+Authorization: Bearer <Firebase ID Token>
+Content-Type: application/json
+
+{ "meetingId": "123456789" }
+```
+
+**Response:**
+```json
+{
+  "meetingId": "123456789",
+  "participant": "zoom_user_id",
+  "obfToken": "eyJhbGci..."
+}
+```
+
+OBF token is valid for **30 minutes** and is scoped to that specific meeting.
+
+#### Batch Join (OBF tokens for multiple users)
+
+```
+POST /api/meetings/batch-join
+Authorization: Bearer <Firebase ID Token>
+Content-Type: application/json
+
+{
+  "meetingId": "123456789",
+  "participants": ["firebase_uid_1", "firebase_uid_2", "firebase_uid_3"]
+}
+```
+
+**Response:**
+```json
+{
+  "meetingId": "123456789",
+  "tokensIssued": 2,
+  "successful": [
+    { "userId": "zoom_user_1", "firebaseUid": "firebase_uid_1", "obfToken": "eyJ..." },
+    { "userId": "zoom_user_2", "firebaseUid": "firebase_uid_2", "obfToken": "eyJ..." }
+  ],
+  "failed": [
+    { "userId": "firebase_uid_3", "firebaseUid": "firebase_uid_3", "error": "Zoom account not connected..." }
+  ]
+}
+```
+
+#### Full Meeting Setup (host ZAK + participant OBF in one call)
+
+```
+POST /api/meetings/setup
+Authorization: Bearer <Firebase ID Token>
+Content-Type: application/json
+
+{
+  "meetingId": "123456789",
+  "hostFirebaseUid": "host_firebase_uid",
+  "participantFirebaseUids": ["uid_1", "uid_2"]
+}
+```
+
+**Response:**
+```json
+{
+  "host": { "userId": "host_zoom_id", "zakToken": "eyJ..." },
+  "participants": [
+    { "userId": "zoom_user_1", "obfToken": "eyJ..." },
+    { "userId": "zoom_user_2", "obfToken": "eyJ..." }
+  ],
+  "failed": [],
+  "meetingId": "123456789",
+  "timestamp": "2026-02-08T..."
+}
+```
+
+---
+
+## Flutter Integration (Quick Reference)
+
+### 1. Sign in with Firebase
+
+```dart
+final idToken = await FirebaseAuth.instance.currentUser!.getIdToken();
+```
+
+### 2. Connect Zoom account (one-time)
+
+```dart
+// Get the OAuth URL
+final res = await http.get(
+  Uri.parse('$baseUrl/api/auth/zoom/url'),
+  headers: {'Authorization': 'Bearer $idToken'},
+);
+final url = jsonDecode(res.body)['url'];
+
+// Open in browser -- user approves -- deep link brings them back
+await launchUrl(Uri.parse(url));
+```
+
+### 3. Get tokens for meetings
+
+```dart
+// Host: get ZAK
+final res = await http.post(
+  Uri.parse('$baseUrl/api/meetings/start'),
+  headers: {
+    'Authorization': 'Bearer $idToken',
+    'Content-Type': 'application/json',
+  },
+  body: jsonEncode({'meetingId': meetingId}),
+);
+final zakToken = jsonDecode(res.body)['zakToken'];
+
+// Participant: get OBF
+final res2 = await http.post(
+  Uri.parse('$baseUrl/api/meetings/join'),
+  headers: {
+    'Authorization': 'Bearer $idToken',
+    'Content-Type': 'application/json',
+  },
+  body: jsonEncode({'meetingId': meetingId}),
+);
+final obfToken = jsonDecode(res2.body)['obfToken'];
+```
+
+### 4. Pass to Zoom SDK
+
+```kotlin
+// Android -- Host
+params.zoomAccessToken = zakToken
+
+// Android -- Participant
+params.onBehalfToken = obfToken
+```
+
+---
+
+## Firestore Collections
+
+| Collection | Documents | Purpose |
+|-----------|-----------|---------|
+| `users` | `{autoId}` | User profiles (fullName, displayName, email, uid) -- written by admin frontend |
+| `zoomTokens` | `{firebaseUid}` | Per-user Zoom OAuth tokens (accessToken, refreshToken, expiry, zoomUserId) |
+| `zoomMeetings` | `{meetingId}` | Meeting metadata and token issuance logs |
+
+---
+
+## Environment Variables
+
+| Variable | Where | Required | Description |
+|----------|-------|----------|-------------|
+| `ZOOM_CLIENT_ID` | `backend/functions/.env` | Yes | From Zoom App Marketplace |
+| `ZOOM_CLIENT_SECRET` | `backend/functions/.env` | Yes | From Zoom App Marketplace |
+| `ZOOM_REDIRECT_URI` | `backend/functions/.env` | Yes | Must match Zoom app's Allow List |
+| `ZOOM_APP_DEEP_LINK` | `backend/functions/.env` | No | Deep link scheme (default: `zoomtest://oauth`) |
+| `ZOOM_AUTHORIZED_DOMAINS` | `backend/functions/.env` | No | Restrict by email domain |
+
+---
+
+## Token Lifetimes
+
+| Token | Validity | Notes |
+|-------|----------|-------|
+| Zoom OAuth access token | 1 hour | Auto-refreshed by backend |
+| Zoom OAuth refresh token | Long-lived | Stored in Firestore, may rotate |
+| ZAK token | 2 hours | Per-user, not meeting-specific |
+| OBF token | 30 minutes | Per-user AND per-meeting |
+| Firebase ID token | 1 hour | Flutter refreshes via `getIdToken()` |
