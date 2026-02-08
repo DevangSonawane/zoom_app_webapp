@@ -1,7 +1,7 @@
 {
   "name": "zoom-token-distribution-server",
   "version": "1.0.0",
-  "description": "Server-to-Server OAuth and OBF/ZAK token distribution system for Zoom Video SDK",
+  "description": "Per-user OAuth and ZAK/OBF token distribution system for Zoom (mirrors Firebase Cloud Functions)",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
@@ -13,15 +13,17 @@
     "video-sdk",
     "oauth",
     "tokens",
-    "websocket"
+    "websocket",
+    "firebase"
   ],
   "author": "",
   "license": "MIT",
   "dependencies": {
-    "axios": "^1.6.0",
+    "axios": "^1.7.2",
     "cors": "^2.8.5",
-    "dotenv": "^16.3.1",
-    "express": "^4.18.2",
+    "dotenv": "^16.5.1",
+    "express": "^4.19.1",
+    "firebase-admin": "^12.0.0",
     "helmet": "^7.1.0",
     "morgan": "^1.10.0",
     "socket.io": "^4.7.0"
@@ -30,6 +32,6 @@
     "nodemon": "^3.0.1"
   },
   "engines": {
-    "node": ">=16.0.0"
+    "node": ">=18.0.0"
   }
 }
